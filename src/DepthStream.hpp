@@ -4,9 +4,8 @@
 #include <cmath> // for M_PI
 #include <cstdio> // for memcpy
 #include "Driver/OniDriverAPI.h"
+#include "Utility.hpp"
 #include "VideoStream.hpp"
-#include "S2D.h"
-#include "D2S.h"
 
 
 namespace RosDriver
@@ -30,7 +29,7 @@ namespace RosDriver
     static const double EMITTER_DCMOS_DISTANCE_VAL = 7.5;
 
   private:
-    typedef std::map< OniVideoMode, std::pair<freenect_depth_format, freenect_resolution> > FreenectDepthModeMap;
+   // typedef std::map< OniVideoMode, std::pair<freenect_depth_format, freenect_resolution> > FreenectDepthModeMap;
     static const OniSensorType sensor_type = ONI_SENSOR_DEPTH;
     OniImageRegistrationMode image_registration_mode;
 
@@ -43,10 +42,10 @@ namespace RosDriver
 
     static OniSensorInfo getSensorInfo()
     {
-      FreenectDepthModeMap supported_modes = getSupportedVideoModes();
-      OniVideoMode* modes = new OniVideoMode[supported_modes.size()];
-      std::transform(supported_modes.begin(), supported_modes.end(), modes, ExtractKey());
-      OniSensorInfo sensors = { sensor_type, static_cast<int>(supported_modes.size()), modes };
+      //FreenectDepthModeMap supported_modes = getSupportedVideoModes();
+      //OniVideoMode* modes = new OniVideoMode[supported_modes.size()];
+      //std::transform(supported_modes.begin(), supported_modes.end(), modes, ExtractKey());
+      OniSensorInfo sensors = { sensor_type,0,NULL};
       return sensors;
     }
 
@@ -192,14 +191,14 @@ namespace RosDriver
           *(static_cast<double*>(data)) = EMITTER_DCMOS_DISTANCE_VAL;
           return ONI_STATUS_OK;
         case XN_STREAM_PROPERTY_S2D_TABLE:              // OniDepthPixel[]
-          *pDataSize = sizeof(S2D);
+          //*pDataSize = sizeof(S2D);
           //std::copy(S2D, S2D+1, static_cast<OniDepthPixel*>(data));
-          memcpy(data, S2D, *pDataSize);
+          //memcpy(data, S2D, *pDataSize);
           return ONI_STATUS_OK;
         case XN_STREAM_PROPERTY_D2S_TABLE:              // unsigned short[]
-          *pDataSize = sizeof(D2S);
+          //*pDataSize = sizeof(D2S);
           //std::copy(D2S, D2S+1, static_cast<unsigned short*>(data));
-          memcpy(data, D2S, *pDataSize);
+          //memcpy(data, D2S, *pDataSize);
           return ONI_STATUS_OK;
       }
     }
@@ -243,13 +242,13 @@ namespace RosDriver
       raisePropertyChanged(ONI_STREAM_PROPERTY_MAX_VALUE, &nInt, size);
 
       unsigned short nBuff[10001];
-      size = sizeof(S2D);
-      getProperty(XN_STREAM_PROPERTY_S2D_TABLE, nBuff, &size);
-      raisePropertyChanged(XN_STREAM_PROPERTY_S2D_TABLE, nBuff, size);
+      //size = sizeof(S2D);
+      //getProperty(XN_STREAM_PROPERTY_S2D_TABLE, nBuff, &size);
+      //raisePropertyChanged(XN_STREAM_PROPERTY_S2D_TABLE, nBuff, size);
 
-      size = sizeof(D2S);
-      getProperty(XN_STREAM_PROPERTY_D2S_TABLE, nBuff, &size);
-      raisePropertyChanged(XN_STREAM_PROPERTY_D2S_TABLE, nBuff, size);
+      //size = sizeof(D2S);
+      //getProperty(XN_STREAM_PROPERTY_D2S_TABLE, nBuff, &size);
+      //raisePropertyChanged(XN_STREAM_PROPERTY_D2S_TABLE, nBuff, size);
 
       VideoStream::notifyAllProperties();
     }

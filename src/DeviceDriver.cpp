@@ -213,7 +213,7 @@ namespace RosDriver
     OniDeviceMap devices;
 
     static std::string devid_to_uri(int id) {
-      return "ros://" + to_string(id);
+      return "ros://" + std::to_string(id);
     }
 
     static int uri_to_devid(const std::string uri) {
@@ -227,11 +227,11 @@ namespace RosDriver
   public:
     Driver(OniDriverServices* pDriverServices) : DriverBase(pDriverServices)
     {
-      WriteMessage("Using libfreenect v" + to_string(PROJECT_VER));
+      //WriteMessage("Using libfreenect v" + to_string(PROJECT_VER));
 
       //freenect_set_log_level(m_ctx, FREENECT_LOG_DEBUG);
-      freenect_select_subdevices(m_ctx, FREENECT_DEVICE_CAMERA); // OpenNI2 doesn't use MOTOR or AUDIO
-      DriverServices = &getServices();
+      //freenect_select_subdevices(m_ctx, FREENECT_DEVICE_CAMERA); // OpenNI2 doesn't use MOTOR or AUDIO
+      pDriverServices =  (OniDriverServices*)&getServices();
     }
     ~Driver() { shutdown(); }
 
@@ -282,11 +282,11 @@ namespace RosDriver
           }
           else 
           {
-            WriteMessage("Opening device " + std::string(uri));
+            //WriteMessage("Opening device " + std::string(uri));
             int id = uri_to_devid(iter->first.uri);
-            Device* device = &createDevice<Device>(id);
-            iter->second = device;
-            return device;
+            //Device* device = &createDevice<Device>(id);
+            //iter->second = device;
+            return 0; // device
           }
         }
       }
@@ -301,10 +301,10 @@ namespace RosDriver
       {
         if (iter->second == pDevice)
         {
-          WriteMessage("Closing device " + std::string(iter->first.uri));
+          //WriteMessage("Closing device " + std::string(iter->first.uri));
           int id = uri_to_devid(iter->first.uri);
           devices.erase(iter);
-          deleteDevice(id);
+          //deleteDevice(id);
           return;
         }
       }
@@ -325,9 +325,9 @@ namespace RosDriver
     {
       for (OniDeviceMap::iterator iter = devices.begin(); iter != devices.end(); iter++)
       {
-        WriteMessage("Closing device " + std::string(iter->first.uri));
+        //WriteMessage("Closing device " + std::string(iter->first.uri));
         int id = uri_to_devid(iter->first.uri);
-        deleteDevice(id);
+        //deleteDevice(id);
       }
 
       devices.clear();

@@ -8,7 +8,9 @@
 #include <sensor_msgs/Image.h>
 
 #include <dynamic_reconfigure/server.h>
+#include "PS1080.h"
 
+#define LogError(e)
 
 namespace RosDriver
 {

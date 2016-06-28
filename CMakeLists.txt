@@ -11,7 +11,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-function")
 find_package(catkin REQUIRED COMPONENTS sensor_msgs roscpp cmake_modules)
 
 ## System dependencies are found with CMake's conventions
-# find_package(Boost REQUIRED COMPONENTS system)
+find_package(Boost REQUIRED COMPONENTS system)
 
 
 ## Uncomment this if the package has a setup.py. This macro ensures
@@ -86,7 +86,7 @@ include_directories(${PROJECT_SOURCE_DIR}/src)
 include_directories(${PROJECT_SOURCE_DIR}/wrappers/cpp)
 
 add_library(RosDriver SHARED ${HEADERS} ${SOURCES})
-
+target_link_libraries(RosDriver ${catkin_LIBRARIES})
 set_target_properties(RosDriver PROPERTIES
   VERSION ${PROJECT_VER}
   SOVERSION ${PROJECT_APIVER}

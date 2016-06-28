@@ -9,7 +9,7 @@ DepthStream::DepthStream(void* pDevice) : VideoStream(pDevice)
   video_mode = makeOniVideoMode(ONI_PIXEL_FORMAT_DEPTH_1_MM, 640, 480, 30);
   image_registration_mode = ONI_IMAGE_REGISTRATION_OFF;
   setVideoMode(video_mode);
-  pDevice->startDepth();
+  //pDevice->startDepth();
 }
 
 #if 0

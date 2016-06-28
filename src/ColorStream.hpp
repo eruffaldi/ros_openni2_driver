@@ -3,6 +3,7 @@
 #include <algorithm> // for transform()
 #include <cmath> // for M_PI
 #include "Driver/OniDriverAPI.h"
+#include "Utility.hpp"
 #include "VideoStream.hpp"
 
 
