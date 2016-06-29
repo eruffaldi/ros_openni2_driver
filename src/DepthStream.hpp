@@ -13,6 +13,7 @@ namespace RosDriver
   class DepthStream : public VideoStream
   {
   public:
+    
     // from NUI library and converted to radians
     static const float DIAGONAL_FOV = 70 * (M_PI / 180);
     static const float HORIZONTAL_FOV = 58.5 * (M_PI / 180);

@@ -20,7 +20,9 @@
 #include "DepthStream.hpp"
 #include "ColorStream.hpp"
 
+#include <boost/thread.hpp>
 #include <image_transport/image_transport.h>
+#include <sensor_msgs/image_encodings.h>
 #include <image_transport/subscriber_filter.h>
 #include <message_filters/subscriber.h>
 #include <message_filters/synchronizer.h>
@@ -28,6 +30,68 @@
 #include <message_filters/sync_policies/approximate_time.h>
 #include <sensor_msgs/image_encodings.h>
 #include <image_geometry/pinhole_camera_model.h>
+
+
+namespace enc = sensor_msgs::image_encodings;
+
+#if 0
+static template<typename T>
+void convert(const sensor_msgs::ImageConstPtr& depth_msg,
+                                      const sensor_msgs::ImageConstPtr& rgb_msg,
+                                      const PointCloud::Ptr& cloud_msg,
+                                      int red_offset, int green_offset, int blue_offset, int color_step)
+{
+  // Use correct principal point from calibration
+  float center_x = model_.cx();
+  float center_y = model_.cy();
+
+  // Combine unit conversion (if necessary) with scaling by focal length for computing (X,Y)
+  double unit_scaling = DepthTraits<T>::toMeters( T(1) );
+  float constant_x = unit_scaling / model_.fx();
+  float constant_y = unit_scaling / model_.fy();
+  float bad_point = std::numeric_limits<float>::quiet_NaN ();
+  
+  const T* depth_row = reinterpret_cast<const T*>(&depth_msg->data[0]);
+  int row_step = depth_msg->step / sizeof(T);
+  const uint8_t* rgb = &rgb_msg->data[0];
+  int rgb_skip = rgb_msg->step - rgb_msg->width * color_step;
+
+  sensor_msgs::PointCloud2Iterator<float> iter_x(*cloud_msg, "x");
+  sensor_msgs::PointCloud2Iterator<float> iter_y(*cloud_msg, "y");
+  sensor_msgs::PointCloud2Iterator<float> iter_z(*cloud_msg, "z");
+  sensor_msgs::PointCloud2Iterator<uint8_t> iter_r(*cloud_msg, "r");
+  sensor_msgs::PointCloud2Iterator<uint8_t> iter_g(*cloud_msg, "g");
+  sensor_msgs::PointCloud2Iterator<uint8_t> iter_b(*cloud_msg, "b");
+  sensor_msgs::PointCloud2Iterator<uint8_t> iter_a(*cloud_msg, "a");
+
+  for (int v = 0; v < int(cloud_msg->height); ++v, depth_row += row_step, rgb += rgb_skip)
+  {
+    for (int u = 0; u < int(cloud_msg->width); ++u, rgb += color_step, ++iter_x, ++iter_y, ++iter_z, ++iter_a, ++iter_r, ++iter_g, ++iter_b)
+    {
+      T depth = depth_row[u];
+
+      // Check for invalid measurements
+      if (!DepthTraits<T>::valid(depth))
+      {
+        *iter_x = *iter_y = *iter_z = bad_point;
+      }
+      else
+      {
+        // Fill in XYZ
+        *iter_x = (u - center_x) * depth * constant_x;
+        *iter_y = (v - center_y) * depth * constant_y;
+        *iter_z = DepthTraits<T>::toMeters(depth);
+      }
+
+      // Fill in color
+      *iter_a = 255;
+      *iter_r = rgb[red_offset];
+      *iter_g = rgb[green_offset];
+      *iter_b = rgb[blue_offset];
+    }
+  }
+}
+#endif
 
 
 namespace RosDriver
@@ -58,16 +122,33 @@ namespace RosDriver
     void VideoCallback(void* data, uint32_t timestamp) {
       color->buildFrame(data, timestamp);
     }
-
+    std::string path;
+    ros::NodeHandle nh;
+    ros::NodeHandle pnh;
+    bool hostedInNode;
+    boost::thread worker;
+    image_geometry::PinholeCameraModel model_;
   public:
-    Device(void* fn_ctx, int index) : /* Freenect::FreenectDevice(fn_ctx, index),*/
+    Device(const char * apath):
+      path(apath), 
       color(NULL),
-      depth(NULL) {
-ros::NodeHandle xx;
-    ros::NodeHandle& nh         = xx;//getNodeHandle();
-    ros::NodeHandle& private_nh = xx;//getPrivateNodeHandle();
-    rgb_nh_.reset( new ros::NodeHandle(nh, "rgb") );
-    ros::NodeHandle depth_nh(nh, "depth_registered");
+      depth(NULL) ,
+      pnh("~"),
+      hostedInNode(false)
+      {
+        hostedInNode = getenv("ROS2OPENNI2") != 0;
+        if(!hostedInNode)
+        {
+          int argc = 1;
+          const char * argv[2] = {"none",NULL};
+          ros::init(argc, (char**)&argv[0], "rosopenni2");
+        }
+
+      // TODO initialize
+
+    ros::NodeHandle& private_nh = pnh;
+    rgb_nh_.reset( new ros::NodeHandle(nh, (path + "rgb").c_str()));
+    ros::NodeHandle depth_nh(nh, (path + "depth_registered").c_str());
     rgb_it_  .reset( new image_transport::ImageTransport(*rgb_nh_) );
     depth_it_.reset( new image_transport::ImageTransport(depth_nh) );
 
@@ -102,25 +183,150 @@ ros::NodeHandle xx;
     sub_info_ .subscribe(*rgb_nh_,   "camera_info",      1);
 
 
+      if(!hostedInNode)
+      {
+          worker = boost::thread(boost::bind(&Device::deviceLoop,this));
+      }
 
-       }
+    }
+
     ~Device()
     {
+      if(!hostedInNode)
+      {
+        ros::shutdown(); // triggers the exit from the loop
+        worker.join();
+      }
       destroyStream(color);
       destroyStream(depth);
+
+    }
+
+    // this is the device thread that invokes ros (for this device or for all, whatever)
+    void deviceLoop()
+    {
+        ros::Rate rate(30);
+        while(ros::ok())
+        {
+            ros::spinOnce();
+            rate.sleep();
+        }
     }
 
     void imageCb(const sensor_msgs::ImageConstPtr& depth_msg,
                                       const sensor_msgs::ImageConstPtr& rgb_msg_in,
                                       const sensor_msgs::CameraInfoConstPtr& info_msg)
     {
+        // DONE inside the worker thread or in some thread of the ROS node
+        // if (depth_msg->header.frame_id != rgb_msg_in->header.frame_id)
+        model_.fromCameraInfo(info_msg);
 
+        // Check if the input image has to be resized
+        sensor_msgs::ImageConstPtr rgb_msg = rgb_msg_in;
+        if (depth_msg->width != rgb_msg->width || depth_msg->height != rgb_msg->height)
+        {
+          sensor_msgs::CameraInfo info_msg_tmp = *info_msg;
+          info_msg_tmp.width = depth_msg->width;
+          info_msg_tmp.height = depth_msg->height;
+          float ratio = float(depth_msg->width)/float(rgb_msg->width);
+          info_msg_tmp.K[0] *= ratio;
+          info_msg_tmp.K[2] *= ratio;
+          info_msg_tmp.K[4] *= ratio;
+          info_msg_tmp.K[5] *= ratio;
+          info_msg_tmp.P[0] *= ratio;
+          info_msg_tmp.P[2] *= ratio;
+          info_msg_tmp.P[5] *= ratio;
+          info_msg_tmp.P[6] *= ratio;
+          model_.fromCameraInfo(info_msg_tmp);
+
+#if 0
+          cv_bridge::CvImageConstPtr cv_ptr;
+          try
+          {
+            cv_ptr = cv_bridge::toCvShare(rgb_msg, rgb_msg->encoding);
+          }
+          catch (cv_bridge::Exception& e)
+          {
+            ROS_ERROR("cv_bridge exception: %s", e.what());
+            return;
+          }
+          cv_bridge::CvImage cv_rsz;
+          cv_rsz.header = cv_ptr->header;
+          cv_rsz.encoding = cv_ptr->encoding;
+          cv::resize(cv_ptr->image.rowRange(0,depth_msg->height/ratio), cv_rsz.image, cv::Size(depth_msg->width, depth_msg->height));
+          if ((rgb_msg->encoding == enc::RGB8) || (rgb_msg->encoding == enc::BGR8) || (rgb_msg->encoding == enc::MONO8))
+            rgb_msg = cv_rsz.toImageMsg();
+          else
+            rgb_msg = cv_bridge::toCvCopy(cv_rsz.toImageMsg(), enc::RGB8)->toImageMsg();
+#endif
+          //NODELET_ERROR_THROTTLE(5, "Depth resolution (%ux%u) does not match RGB resolution (%ux%u)",
+          //                       depth_msg->width, depth_msg->height, rgb_msg->width, rgb_msg->height);
+          //return;
+        } else
+          rgb_msg = rgb_msg_in;
+
+        // Supported color encodings: RGB8, BGR8, MONO8
+        int red_offset, green_offset, blue_offset, color_step;
+        if (rgb_msg->encoding == enc::RGB8)
+        {
+          red_offset   = 0;
+          green_offset = 1;
+          blue_offset  = 2;
+          color_step   = 3;
+        }
+        else if (rgb_msg->encoding == enc::BGR8)
+        {
+          red_offset   = 2;
+          green_offset = 1;
+          blue_offset  = 0;
+          color_step   = 3;
+        }
+        else if (rgb_msg->encoding == enc::MONO8)
+        {
+          red_offset   = 0;
+          green_offset = 0;
+          blue_offset  = 0;
+          color_step   = 1;
+        }
+        else
+        {
+#if 0
+          try
+          {
+            rgb_msg = cv_bridge::toCvCopy(rgb_msg, enc::RGB8)->toImageMsg();
+          }
+          catch (cv_bridge::Exception& e)
+          {
+            NODELET_ERROR_THROTTLE(5, "Unsupported encoding [%s]: %s", rgb_msg->encoding.c_str(), e.what());
+            return;
+          }
+#endif          
+          red_offset   = 0;
+          green_offset = 1;
+          blue_offset  = 2;
+          color_step   = 3;
+        }
+
+        if (depth_msg->encoding == enc::TYPE_16UC1)
+        {
+          //convert<uint16_t>(depth_msg, rgb_msg, cloud_msg, red_offset, green_offset, blue_offset, color_step);
+        }
+        else if (depth_msg->encoding == enc::TYPE_32FC1)
+        {
+          //convert<float>(depth_msg, rgb_msg, cloud_msg, red_offset, green_offset, blue_offset, color_step);
+        }
+        else
+        {
+
+        }
+
+        // THEN IT IS READY FOR PUSH in the Color and DepthStream
     }
 
-    // for DeviceBase
-
+    // we support only registered depth to color
     OniBool isImageRegistrationModeSupported(OniImageRegistrationMode mode) { return depth->isImageRegistrationModeSupported(mode); }
 
+    // color and depth, no IR whatsoever
     OniStatus getSensorInfoList(OniSensorInfo** pSensors, int* numSensors)
     {
       *numSensors = 2;
@@ -131,6 +337,7 @@ ros::NodeHandle xx;
       return ONI_STATUS_OK;
     }
 
+    // create the stream  easy
     oni::driver::StreamBase* createStream(OniSensorType sensorType)
     {
       switch (sensorType)
@@ -154,16 +361,13 @@ ros::NodeHandle xx;
     {
       if (pStream == NULL)
         return;
-
-      if (pStream == color)
+      else if (pStream == color)
       {
-        //Freenect::FreenectDevice::stopVideo();
         delete color;
         color = NULL;
       }
-      if (pStream == depth)
+      else if (pStream == depth)
       {
-        //Freenect::FreenectDevice::stopDepth();
         delete depth;
         depth = NULL;
       }
@@ -174,7 +378,8 @@ ros::NodeHandle xx;
     {
       if (propertyId == ONI_DEVICE_PROPERTY_IMAGE_REGISTRATION)
         return true;
-      return false;
+      else
+        return false;
     }
 
     OniStatus getProperty(int propertyId, void* data, int* pDataSize)
@@ -291,90 +496,52 @@ ros::NodeHandle xx;
     typedef std::map<OniDeviceInfo, oni::driver::DeviceBase*> OniDeviceMap;
     OniDeviceMap devices;
 
-    static std::string devid_to_uri(int id) {
-      return "ros://" + std::to_string(id);
-    }
-
-    static int uri_to_devid(const std::string uri) {
-      int id;
-      std::istringstream is(uri);
-      is.seekg(strlen("ros://"));
-      is >> id;
-      return id;
-    }
-
   public:
     Driver(OniDriverServices* pDriverServices) : DriverBase(pDriverServices)
     {
-      //WriteMessage("Using libfreenect v" + to_string(PROJECT_VER));
-
-      //freenect_set_log_level(m_ctx, FREENECT_LOG_DEBUG);
-      //freenect_select_subdevices(m_ctx, FREENECT_DEVICE_CAMERA); // OpenNI2 doesn't use MOTOR or AUDIO
-      pDriverServices =  (OniDriverServices*)&getServices();
+          pDriverServices =  (OniDriverServices*)&getServices();
     }
-    ~Driver() { shutdown(); }
+    ~Driver() 
+    {
+       shutdown(); 
+    }
 
-    // for DriverBase
-
+    // NO AUTOMATIC LOOKUP
     OniStatus initialize(oni::driver::DeviceConnectedCallback connectedCallback, oni::driver::DeviceDisconnectedCallback disconnectedCallback, oni::driver::DeviceStateChangedCallback deviceStateChangedCallback, void* pCookie)
     {
       DriverBase::initialize(connectedCallback, disconnectedCallback, deviceStateChangedCallback, pCookie);
-#if 0      
-      for (int i = 0; i < Freenect::deviceCount(); i++)
-      {
-        std::string uri = devid_to_uri(i);
-
-        WriteMessage("Found device " + uri);
-        
-        OniDeviceInfo info;
-        strncpy(info.uri, uri.c_str(), ONI_MAX_STR);
-        strncpy(info.vendor, "Microsoft", ONI_MAX_STR);
-        strncpy(info.name, "Kinect", ONI_MAX_STR);
-        devices[info] = NULL;
-        deviceConnected(&info);
-        deviceStateChanged(&info, 0);
-
-        freenect_device* dev;
-        if (freenect_open_device(m_ctx, &dev, i) == 0)
-        {
-          info.usbVendorId = dev->usb_cam.VID;
-          info.usbProductId = dev->usb_cam.PID;
-          freenect_close_device(dev);
-        }
-        else
-        {
-          WriteMessage("Unable to open device to query VID/PID");
-        }
-  #endif
       return ONI_STATUS_OK;
     }
 
-    /// TBD
+    /// we support devices via prefixes of the topics assuming we have the ros:// prefix in the uri
     oni::driver::DeviceBase* deviceOpen(const char* uri, const char* mode = NULL)
     {
       for (OniDeviceMap::iterator iter = devices.begin(); iter != devices.end(); iter++)
       {
         if (strcmp(iter->first.uri, uri) == 0) // found
         {
-          if (iter->second) // already open
-          {
             return iter->second;
-          }
-          else 
-          {
-            //WriteMessage("Opening device " + std::string(uri));
-            int id = uri_to_devid(iter->first.uri);
-            Device* device = new Device(0,id);
-            iter->second = device;
-            return 0; // device
-          }
         }
       }
 
-      LogError("Could not find device " + std::string(uri));
-      return NULL;
+      if(strncmp(uri,"ros://",6) == 0)
+      {
+        Device * device = new Device(uri + 6);
+
+        OniDeviceInfo info;
+        strncpy(info.uri, uri, ONI_MAX_STR);
+        strncpy(info.vendor, "ROS", ONI_MAX_STR);
+        strncpy(info.name, "Kinect", ONI_MAX_STR);
+        devices[info] = device;
+        deviceConnected(&info);
+        deviceStateChanged(&info, 0);
+        return device;
+      }
+      else
+        return NULL;
     }
 
+    // close a given device by pointer
     void deviceClose(oni::driver::DeviceBase* pDevice)
     {
       for (OniDeviceMap::iterator iter = devices.begin(); iter != devices.end(); iter++)
@@ -385,30 +552,38 @@ ros::NodeHandle xx;
           device->stop();
           device->close();
           devices.erase(iter);
+          delete device;
           return;
         }
       }
-
       LogError("Could not close unrecognized device");
     }
 
+    /// try opening the given device
     OniStatus tryDevice(const char* uri)
     {
       oni::driver::DeviceBase* device = deviceOpen(uri);
-      if (! device)
+      if (!device)
+      {
         return ONI_STATUS_ERROR;
-      deviceClose(device);
-      return ONI_STATUS_OK;
+      }
+      else
+      {
+        deviceClose(device);
+        return ONI_STATUS_OK;
+      }
     }
 
     void shutdown()
     {
       for (OniDeviceMap::iterator iter = devices.begin(); iter != devices.end(); iter++)
       {
-        if(iter->second)
-          deviceClose(iter->second);
+          Device* device = (Device*)iter->second;
+          device->stop();
+          device->close();
+          iter->second = NULL;
+          delete device;
       }
-
       devices.clear();
     }
 
