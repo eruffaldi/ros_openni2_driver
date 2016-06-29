@@ -4,7 +4,7 @@
 using namespace RosDriver;
 
 
-ColorStream::ColorStream(void* pDevice) : VideoStream(pDevice)
+ColorStream::ColorStream(Device* pDevice) : VideoStream(pDevice)
 {
   video_mode = makeOniVideoMode(ONI_PIXEL_FORMAT_RGB888, 640, 480, 30);
   setVideoMode(video_mode);

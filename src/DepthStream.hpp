@@ -37,7 +37,7 @@ namespace RosDriver
     void populateFrame(void* data, OniFrame* frame) const;
 
   public:
-    DepthStream(void* pDevice);
+    DepthStream(Device* pDevice);
     //~DepthStream() { }
 
     static OniSensorInfo getSensorInfo()
@@ -52,10 +52,10 @@ namespace RosDriver
     OniImageRegistrationMode getImageRegistrationMode() const { return image_registration_mode; }
     OniStatus setImageRegistrationMode(OniImageRegistrationMode mode)
     {
-      if (!isImageRegistrationModeSupported(mode))
+     // if (!isImageRegistrationModeSupported(mode))
         return ONI_STATUS_NOT_SUPPORTED;
-      image_registration_mode = mode;
-      return setVideoMode(video_mode);
+      //image_registration_mode = mode;
+      //return setVideoMode(video_mode);
     }
 
     // from StreamBase

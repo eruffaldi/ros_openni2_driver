@@ -20,6 +20,15 @@
 #include "DepthStream.hpp"
 #include "ColorStream.hpp"
 
+#include <image_transport/image_transport.h>
+#include <image_transport/subscriber_filter.h>
+#include <message_filters/subscriber.h>
+#include <message_filters/synchronizer.h>
+#include <message_filters/sync_policies/exact_time.h>
+#include <message_filters/sync_policies/approximate_time.h>
+#include <sensor_msgs/image_encodings.h>
+#include <image_geometry/pinhole_camera_model.h>
+
 
 namespace RosDriver
 {
@@ -28,6 +37,19 @@ namespace RosDriver
   private:
     ColorStream* color;
     DepthStream* depth;
+
+    ros::NodeHandlePtr rgb_nh_;
+    boost::shared_ptr<image_transport::ImageTransport> rgb_it_, depth_it_;
+
+    // Subscriptions
+    image_transport::SubscriberFilter sub_depth_, sub_rgb_;
+    message_filters::Subscriber<sensor_msgs::CameraInfo> sub_info_;
+    typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::Image, sensor_msgs::Image, sensor_msgs::CameraInfo> SyncPolicy;
+    typedef message_filters::sync_policies::ExactTime<sensor_msgs::Image, sensor_msgs::Image, sensor_msgs::CameraInfo> ExactSyncPolicy;
+    typedef message_filters::Synchronizer<SyncPolicy> Synchronizer;
+    typedef message_filters::Synchronizer<ExactSyncPolicy> ExactSynchronizer;
+    boost::shared_ptr<Synchronizer> sync_;
+    boost::shared_ptr<ExactSynchronizer> exact_sync_;
 
     // for Freenect::FreenectDevice
     void DepthCallback(void* data, uint32_t timestamp) {
@@ -40,11 +62,59 @@ namespace RosDriver
   public:
     Device(void* fn_ctx, int index) : /* Freenect::FreenectDevice(fn_ctx, index),*/
       color(NULL),
-      depth(NULL) { }
+      depth(NULL) {
+ros::NodeHandle xx;
+    ros::NodeHandle& nh         = xx;//getNodeHandle();
+    ros::NodeHandle& private_nh = xx;//getPrivateNodeHandle();
+    rgb_nh_.reset( new ros::NodeHandle(nh, "rgb") );
+    ros::NodeHandle depth_nh(nh, "depth_registered");
+    rgb_it_  .reset( new image_transport::ImageTransport(*rgb_nh_) );
+    depth_it_.reset( new image_transport::ImageTransport(depth_nh) );
+
+    // Read parameters
+    int queue_size;
+    private_nh.param("queue_size", queue_size, 5);
+    bool use_exact_sync;
+    private_nh.param("exact_sync", use_exact_sync, false);
+
+    // Synchronize inputs. Topic subscriptions happen on demand in the connection callback.
+    if (use_exact_sync)
+    {
+      exact_sync_.reset( new ExactSynchronizer(ExactSyncPolicy(queue_size), sub_depth_, sub_rgb_, sub_info_) );
+      exact_sync_->registerCallback(boost::bind(&Device::imageCb, this, _1, _2, _3));
+    }
+    else
+    {
+      sync_.reset( new Synchronizer(SyncPolicy(queue_size), sub_depth_, sub_rgb_, sub_info_) );
+      sync_->registerCallback(boost::bind(&Device::imageCb, this, _1, _2, _3));
+    }
+
+    // parameter for depth_image_transport hint
+    std::string depth_image_transport_param = "depth_image_transport";
+
+    // depth image can use different transport.(e.g. compressedDepth)
+    image_transport::TransportHints depth_hints("raw",ros::TransportHints(), private_nh, depth_image_transport_param);
+    sub_depth_.subscribe(*depth_it_, "image_rect",       1, depth_hints);
+
+    // rgb uses normal ros transport hints.
+    image_transport::TransportHints hints("raw", ros::TransportHints(), private_nh);
+    sub_rgb_  .subscribe(*rgb_it_,   "image_rect_color", 1, hints);
+    sub_info_ .subscribe(*rgb_nh_,   "camera_info",      1);
+
+
+
+       }
     ~Device()
     {
       destroyStream(color);
       destroyStream(depth);
+    }
+
+    void imageCb(const sensor_msgs::ImageConstPtr& depth_msg,
+                                      const sensor_msgs::ImageConstPtr& rgb_msg_in,
+                                      const sensor_msgs::CameraInfoConstPtr& info_msg)
+    {
+
     }
 
     // for DeviceBase
@@ -199,6 +269,15 @@ namespace RosDriver
       }
     }
 
+    void stop()
+    {
+
+    }
+
+    void close()
+    {
+
+    }
 
     /* todo: for DeviceBase
     virtual OniStatus tryManualTrigger() {return ONI_STATUS_OK;}
@@ -270,6 +349,7 @@ namespace RosDriver
       return ONI_STATUS_OK;
     }
 
+    /// TBD
     oni::driver::DeviceBase* deviceOpen(const char* uri, const char* mode = NULL)
     {
       for (OniDeviceMap::iterator iter = devices.begin(); iter != devices.end(); iter++)
@@ -284,8 +364,8 @@ namespace RosDriver
           {
             //WriteMessage("Opening device " + std::string(uri));
             int id = uri_to_devid(iter->first.uri);
-            //Device* device = &createDevice<Device>(id);
-            //iter->second = device;
+            Device* device = new Device(0,id);
+            iter->second = device;
             return 0; // device
           }
         }
@@ -301,10 +381,10 @@ namespace RosDriver
       {
         if (iter->second == pDevice)
         {
-          //WriteMessage("Closing device " + std::string(iter->first.uri));
-          int id = uri_to_devid(iter->first.uri);
+          Device* device = (Device*)iter->second;
+          device->stop();
+          device->close();
           devices.erase(iter);
-          //deleteDevice(id);
           return;
         }
       }
@@ -325,9 +405,8 @@ namespace RosDriver
     {
       for (OniDeviceMap::iterator iter = devices.begin(); iter != devices.end(); iter++)
       {
-        //WriteMessage("Closing device " + std::string(iter->first.uri));
-        int id = uri_to_devid(iter->first.uri);
-        //deleteDevice(id);
+        if(iter->second)
+          deviceClose(iter->second);
       }
 
       devices.clear();

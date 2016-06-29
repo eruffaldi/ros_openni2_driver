@@ -27,7 +27,7 @@ namespace RosDriver
     bool auto_exposure;
 
   public:
-    ColorStream(void* pDevice);
+    ColorStream(Device* pDevice);
     //~ColorStream() { }
 
     static OniSensorInfo getSensorInfo()
@@ -147,7 +147,7 @@ namespace RosDriver
             LogError("Unexpected size for ONI_STREAM_PROPERTY_MIRRORING");
             return ONI_STATUS_ERROR;
           }
-          mirroring = *(static_cast<const OniBool*>(data));
+          //mirroring = *(static_cast<const OniBool*>(data));
           int ret = 0;//device->setFlag(FREENECT_MIRROR_VIDEO, mirroring);
           return (ret == 0) ? ONI_STATUS_OK : ONI_STATUS_ERROR;
         }

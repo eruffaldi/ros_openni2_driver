@@ -4,10 +4,10 @@
 using namespace RosDriver;
 
 
-DepthStream::DepthStream(void* pDevice) : VideoStream(pDevice)
+DepthStream::DepthStream(Device* pDevice) : VideoStream(pDevice)
 {
   video_mode = makeOniVideoMode(ONI_PIXEL_FORMAT_DEPTH_1_MM, 640, 480, 30);
-  image_registration_mode = ONI_IMAGE_REGISTRATION_OFF;
+  image_registration_mode = ONI_IMAGE_REGISTRATION_DEPTH_TO_COLOR;
   setVideoMode(video_mode);
   //pDevice->startDepth();
 }
@@ -64,6 +64,7 @@ void DepthStream::populateFrame(void* data, OniFrame* frame) const
   frame->sensorType = sensor_type;
   frame->stride = video_mode.resolutionX * sizeof(uint16_t);
 
+/*
   if (cropping.enabled)
   {
     frame->height = cropping.height;
@@ -73,6 +74,7 @@ void DepthStream::populateFrame(void* data, OniFrame* frame) const
     frame->croppingEnabled = true;
   }
   else
+    */
   {
     frame->cropOriginX = 0;
     frame->cropOriginY = 0;
@@ -86,6 +88,7 @@ void DepthStream::populateFrame(void* data, OniFrame* frame) const
   uint16_t* target = static_cast<uint16_t*>(frame->data);
   const unsigned int skipWidth = video_mode.resolutionX - frame->width;
 
+/*
   if (mirroring)
   {
     target += frame->width;
@@ -100,8 +103,9 @@ void DepthStream::populateFrame(void* data, OniFrame* frame) const
       source += skipWidth;
       target += 2 * frame->width;
     }
-  }
+  }  
   else
+*/
   {
     for (int y = 0; y < frame->height; y++)
     {

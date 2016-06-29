@@ -7,6 +7,16 @@
 
 #include <sensor_msgs/Image.h>
 
+#include <image_transport/image_transport.h>
+#include <image_transport/subscriber_filter.h>
+#include <message_filters/subscriber.h>
+#include <message_filters/synchronizer.h>
+#include <message_filters/sync_policies/exact_time.h>
+#include <message_filters/sync_policies/approximate_time.h>
+#include <sensor_msgs/image_encodings.h>
+
+#include <image_geometry/pinhole_camera_model.h>
+
 #include <dynamic_reconfigure/server.h>
 #include "PS1080.h"
 
@@ -14,6 +24,8 @@
 
 namespace RosDriver
 {
+  class Device;
+
   class VideoStream : public oni::driver::StreamBase
   {
   private:
@@ -22,22 +34,19 @@ namespace RosDriver
     virtual OniStatus setVideoMode(OniVideoMode requested_mode) = 0;
     virtual void populateFrame(void* data, OniFrame* frame) const = 0;
 
+
   protected:
     static const OniSensorType sensor_type;
-    void* device;
+    Device* device;
     bool running; // buildFrame() does something iff true
     OniVideoMode video_mode;
-    OniCropping cropping;
-    bool mirroring;
 
   public:
-    VideoStream(void* device) :
+    VideoStream(Device* device) :
       frame_id(1),
-      device(device),
-      mirroring(false)
+      device(device)
       {
         // joy of structs
-        memset(&cropping, 0, sizeof(cropping));
         memset(&video_mode, 0, sizeof(video_mode));
       }
     //~VideoStream() { stop();  }
@@ -117,7 +126,7 @@ namespace RosDriver
             LogError("Unexpected size for ONI_STREAM_PROPERTY_CROPPING");
             return ONI_STATUS_ERROR;
           }
-          *(static_cast<OniCropping*>(data)) = cropping;
+         // *(static_cast<OniCropping*>(data)) = cropping;
           return ONI_STATUS_OK;
 
         case ONI_STREAM_PROPERTY_MIRRORING:           // OniBool
@@ -126,7 +135,7 @@ namespace RosDriver
             LogError("Unexpected size for ONI_STREAM_PROPERTY_MIRRORING");
             return ONI_STATUS_ERROR;
           }
-          *(static_cast<OniBool*>(data)) = mirroring;
+         // *(static_cast<OniBool*>(data)) = mirroring;
           return ONI_STATUS_OK;
       }
     }
@@ -150,17 +159,20 @@ namespace RosDriver
           return ONI_STATUS_NOT_SUPPORTED;
 
         case ONI_STREAM_PROPERTY_VIDEO_MODE:          // OniVideoMode*
+        #if 0
           if (dataSize != sizeof(OniVideoMode))
           {
             LogError("Unexpected size for ONI_STREAM_PROPERTY_VIDEO_MODE");
             return ONI_STATUS_ERROR;
           }
           if (ONI_STATUS_OK != setVideoMode(*(static_cast<const OniVideoMode*>(data))))
-            return ONI_STATUS_NOT_SUPPORTED;
           raisePropertyChanged(propertyId, data, dataSize);
           return ONI_STATUS_OK;
+          #endif
+            return ONI_STATUS_NOT_SUPPORTED;
 
         case ONI_STREAM_PROPERTY_CROPPING:            // OniCropping*
+        #if 0
           if (dataSize != sizeof(OniCropping))
           {
             LogError("Unexpected size for ONI_STREAM_PROPERTY_CROPPING");
@@ -169,8 +181,11 @@ namespace RosDriver
           cropping = *(static_cast<const OniCropping*>(data));
           raisePropertyChanged(propertyId, data, dataSize);
           return ONI_STATUS_OK;
+          #endif
+            return ONI_STATUS_NOT_SUPPORTED;
 
         case ONI_STREAM_PROPERTY_MIRRORING:           // OniBool
+        #if 0
           if (dataSize != sizeof(OniBool))
           {
             LogError("Unexpected size for ONI_STREAM_PROPERTY_MIRRORING");
@@ -179,6 +194,9 @@ namespace RosDriver
           mirroring = *(static_cast<const OniBool*>(data));
           raisePropertyChanged(propertyId, data, dataSize);
           return ONI_STATUS_OK;
+        #endif
+            return ONI_STATUS_NOT_SUPPORTED;
+
       }
     }
 
